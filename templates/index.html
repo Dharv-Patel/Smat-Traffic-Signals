@@ -1,0 +1,2039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Surat Smart Traffic · Live Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --bg:       #080c14;
+    --surface:  #0d1420;
+    --surface2: #111827;
+    --border:   #1e2d45;
+    --accent:   #00d4ff;
+    --accent2:  #ff6b35;
+    --green:    #00ff88;
+    --yellow:   #ffd700;
+    --red:      #ff3b5c;
+    --text:     #e2e8f0;
+    --muted:    #64748b;
+    --font-display: 'Rajdhani', sans-serif;
+    --font-mono:    'JetBrains Mono', monospace;
+    --font-body:    'Inter', sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text); font-family: var(--font-body);
+    height: 100vh; overflow: hidden; display: grid;
+    grid-template-rows: 56px 1fr;
+    grid-template-columns: 320px 1fr 300px;
+    grid-template-areas: "header header header" "sidebar map panel";
+  }
+
+  /* Header */
+  header {
+    grid-area: header; background: var(--surface); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 20px; gap: 16px;
+    position: relative; z-index: 100;
+  }
+  .logo { display: flex; align-items: center; gap: 10px; font-family: var(--font-display);
+    font-size: 22px; font-weight: 700; letter-spacing: 1px; color: var(--accent); }
+  .logo-icon { font-size: 28px; }
+  .logo span { color: var(--text); }
+  .header-meta { margin-left: auto; display: flex; gap: 24px; align-items: center;
+    font-size: 12px; font-family: var(--font-mono); color: var(--muted); }
+  .live-badge { display: flex; align-items: center; gap: 6px; color: var(--green);
+    font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 8px var(--green); animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
+  #clock { color: var(--accent); font-weight: 700; }
+  #traffic-period { font-size: 11px; color: var(--yellow); font-weight: 600; }
+
+  /* Sidebar */
+  #sidebar { grid-area: sidebar; background: var(--surface); border-right: 1px solid var(--border);
+    overflow-y: auto; display: flex; flex-direction: column; }
+  #sidebar::-webkit-scrollbar { width: 4px; }
+  #sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .section-label { padding: 12px 16px 8px; font-family: var(--font-display); font-size: 11px;
+    font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px solid var(--border); }
+
+  /* Junction cards */
+  .junction-card { padding: 10px 16px; border-bottom: 1px solid rgba(30,45,69,.5);
+    cursor: pointer; transition: background .15s; }
+  .junction-card:hover { background: var(--surface2); }
+  .junction-card.active { background: rgba(0,212,255,.06); border-left: 2px solid var(--accent); }
+  .card-top { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; }
+
+  /* Signal tower icon in sidebar */
+  .signal-tower {
+    width: 22px; background: #1a1a1a; border-radius: 3px;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: space-evenly; padding: 3px 2px; gap: 2px;
+    border: 1px solid #2a2a2a; flex-shrink: 0;
+  }
+  .sig-light { width: 9px; height: 9px; border-radius: 50%; transition: all .3s; }
+  .sig-light.on-red    { background: var(--red);    box-shadow: 0 0 6px var(--red); }
+  .sig-light.on-yellow { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+  .sig-light.on-green  { background: var(--green);  box-shadow: 0 0 6px var(--green); }
+  .sig-light.off       { background: #2a2a2a; }
+  .sig-light.blink-green { background: var(--green); box-shadow: 0 0 8px var(--green);
+    animation: blink-g 0.5s step-start infinite; }
+  @keyframes blink-g { 0%,49%{ background:var(--green); box-shadow:0 0 10px var(--green); opacity:1; }
+    50%,100%{ background:#002510; box-shadow:none; opacity:0.3; } }
+  .road-sig-dot.blink-green { background: var(--green); box-shadow: 0 0 6px var(--green);
+    animation: blink-g 0.5s step-start infinite; }
+
+  .junc-info { min-width: 0; }
+  .junc-name { font-family: var(--font-display); font-size: 14px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .junc-meta { font-size: 11px; font-family: var(--font-mono); color: var(--muted); margin-top: 2px; }
+  .veh-wrap { text-align: right; }
+  .veh-val { font-family: var(--font-mono); font-size: 13px; font-weight: 700; }
+  .veh-bar { width: 48px; height: 4px; background: var(--border); border-radius: 2px;
+    margin-top: 4px; overflow: hidden; }
+  .veh-fill { height: 100%; border-radius: 2px; transition: width .5s, background .5s; }
+  .countdown-badge { font-family: var(--font-mono); font-size: 10px; background: var(--surface2);
+    padding: 2px 6px; border-radius: 3px; color: var(--muted); margin-top: 4px; display: inline-block; }
+
+  /* Per-road signals inside expanded card */
+  .road-signals { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+  .road-signal-row {
+    display: flex; align-items: center; gap: 8px; padding: 4px 6px;
+    background: rgba(255,255,255,.03); border-radius: 4px;
+    font-size: 11px; font-family: var(--font-mono);
+  }
+  .road-sig-lights {
+    display: flex; flex-direction: column; gap: 1px;
+    background: #111; border-radius: 2px; padding: 2px 2px; border: 1px solid #222;
+  }
+  .road-sig-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .road-sig-dot.on-red    { background: var(--red);    box-shadow: 0 0 4px var(--red); }
+  .road-sig-dot.on-yellow { background: var(--yellow); box-shadow: 0 0 4px var(--yellow); }
+  .road-sig-dot.on-green  { background: var(--green);  box-shadow: 0 0 4px var(--green); }
+  .road-sig-dot.off       { background: #252525; }
+  .road-name  { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .road-cd    { color: var(--muted); flex-shrink: 0; }
+  .road-vehs  { flex-shrink: 0; font-weight: 700; }
+
+  /* Map */
+  #map-container { grid-area: map; position: relative; }
+  #map { width: 100%; height: 100%; }
+  .leaflet-container { background: #0d1520 !important; }
+
+  /* Right panel */
+  #panel { grid-area: panel; background: var(--surface); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow-y: auto; }
+  #panel::-webkit-scrollbar { width: 4px; }
+  #panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .route-box { padding: 16px; }
+  .form-group { margin-bottom: 10px; }
+  .form-group label { display: block; font-size: 10px; font-weight: 500;
+    text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 4px; }
+  .form-group select { width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); padding: 8px 10px; border-radius: 6px; font-family: var(--font-body);
+    font-size: 13px; appearance: none; cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2364748b'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center; }
+  .form-group select:focus { outline: none; border-color: var(--accent); }
+  .btn-find { width: 100%; padding: 10px;
+    background: linear-gradient(135deg, var(--accent), #0099cc);
+    border: none; border-radius: 6px; color: #000; font-family: var(--font-display);
+    font-size: 15px; font-weight: 700; letter-spacing: 1px; cursor: pointer;
+    transition: opacity .2s; text-transform: uppercase; }
+  .btn-find:hover { opacity: .85; }
+  #route-result { margin-top: 12px; padding: 12px; background: var(--surface2);
+    border-radius: 6px; border: 1px solid var(--border); display: none; }
+  .route-stat { display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; margin-bottom: 6px; }
+  .route-stat .lbl { color: var(--muted); }
+  .route-stat .val { font-family: var(--font-mono); color: var(--accent); font-weight: 700; }
+  .route-stops { margin-top: 10px; }
+  .route-stop { display: flex; align-items: center; gap: 8px; font-size: 12px;
+    padding: 4px 0; border-left: 1px dashed var(--border); padding-left: 10px; margin-left: 5px; }
+  .route-stop .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+    margin-left: -14px; flex-shrink: 0; border: 2px solid var(--bg); }
+  .route-stop:first-child .dot { background: var(--green); }
+  .route-stop:last-child  .dot { background: var(--red); }
+
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 16px 16px; }
+  .stat-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+  .stat-card .s-val { font-family: var(--font-mono); font-size: 22px; font-weight: 700;
+    color: var(--accent); display: block; }
+  .stat-card .s-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+
+  #junction-detail { margin: 0 16px 16px; padding: 12px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 8px; display: none; }
+  #junction-detail h4 { font-family: var(--font-display); font-size: 15px; font-weight: 700;
+    margin-bottom: 8px; color: var(--text); }
+  .detail-road-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .detail-road-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    background: rgba(255,255,255,.03); border-radius: 5px; font-size: 11px; font-family: var(--font-mono); }
+  .detail-road-lights { display: flex; flex-direction: column; gap: 1px; background: #111;
+    border-radius: 2px; padding: 2px; border: 1px solid #222; }
+  .detail-road-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .detail-road-dot.on-red    { background: var(--red);    box-shadow: 0 0 5px var(--red); }
+  .detail-road-dot.on-yellow { background: var(--yellow); box-shadow: 0 0 5px var(--yellow); }
+  .detail-road-dot.on-green  { background: var(--green);  box-shadow: 0 0 5px var(--green); }
+  .detail-road-dot.off       { background: #252525; }
+  .detail-road-name { flex: 1; color: var(--text); }
+  .detail-road-badge { padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; }
+  .badge-green  { background: rgba(0,255,136,.15); color: var(--green); }
+  .badge-yellow { background: rgba(255,215,0,.15);  color: var(--yellow); }
+  .badge-red    { background: rgba(255,59,92,.15);  color: var(--red); }
+
+  .legend { padding: 0 16px 16px; }
+  .legend h4 { font-family: var(--font-display); font-size: 12px; font-weight: 600;
+    color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 11px; margin-bottom: 4px; }
+  .legend-dot  { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .legend-arrow { font-size: 14px; flex-shrink: 0; }
+
+  /* ── Ambulance Corridor ──────────────────────────────────────────────────── */
+  :root { --amber: #ff9900; }
+  .amb-box { padding: 16px; }
+  .amb-box .form-group { margin-bottom: 10px; }
+  .btn-amb { width: 100%; padding: 10px;
+    background: linear-gradient(135deg, #ff9900, #e65c00);
+    border: none; border-radius: 6px; color: #000; font-family: var(--font-display);
+    font-size: 14px; font-weight: 700; letter-spacing: 1px; cursor: pointer;
+    transition: opacity .2s; text-transform: uppercase; display: flex;
+    align-items: center; justify-content: center; gap: 8px; }
+  .btn-amb:hover { opacity: .85; }
+  .btn-amb:disabled { opacity: .4; cursor: not-allowed; }
+  #amb-corridors { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .corridor-card { background: rgba(255,153,0,.08); border: 1px solid rgba(255,153,0,.3);
+    border-radius: 6px; padding: 8px 10px; font-size: 11px; font-family: var(--font-mono); }
+  .corridor-card .c-id   { color: var(--amber); font-weight: 700; font-size: 12px; }
+  .corridor-card .c-path { color: var(--muted); margin: 3px 0; line-height: 1.5; }
+  .corridor-card .c-meta { display: flex; justify-content: space-between; margin-top: 4px; }
+  .corridor-card .c-ttl  { color: var(--amber); }
+  .btn-cancel { background: rgba(255,59,92,.15); border: 1px solid rgba(255,59,92,.3);
+    color: var(--red); border-radius: 4px; padding: 2px 8px; font-size: 10px;
+    cursor: pointer; font-family: var(--font-mono); }
+  .btn-cancel:hover { background: rgba(255,59,92,.3); }
+  /* Ambulance signal tower glow (junction card in sidebar) */
+  .sig-light.amb-green { background: var(--amber); box-shadow: 0 0 10px var(--amber);
+    animation: amb-pulse 0.8s ease-in-out infinite; }
+  @keyframes amb-pulse {
+    0%,100% { opacity:1; box-shadow: 0 0 10px var(--amber); }
+    50%      { opacity:.6; box-shadow: 0 0 20px var(--amber); }
+  }
+  .junction-card.amb-active { border-left: 2px solid var(--amber) !important;
+    background: rgba(255,153,0,.06) !important; }
+
+  /* Ambulance moving marker */
+  .amb-vehicle-icon { filter: drop-shadow(0 0 8px #ff9900) drop-shadow(0 0 16px #ff6600); }
+  @keyframes amb-siren { 0%,100%{filter:drop-shadow(0 0 8px #ff9900) drop-shadow(0 0 18px #ff4400);}
+    50%{filter:drop-shadow(0 0 14px #00aaff) drop-shadow(0 0 24px #0055ff);} }
+  .amb-vehicle-icon.siren { animation: amb-siren 0.5s step-start infinite; }
+
+  /* VIP Corridor */
+  :root { --vip: #c9a227; --vip-light: #f0c040; }
+  .vip-box { padding: 16px; }
+  .vip-box .form-group { margin-bottom: 10px; }
+  .btn-vip { width: 100%; padding: 10px;
+    background: linear-gradient(135deg, #c9a227, #8b6914);
+    border: 1px solid #c9a227; border-radius: 6px; color: #000;
+    font-family: var(--font-display); font-size: 14px; font-weight: 700;
+    letter-spacing: 1px; cursor: pointer; transition: opacity .2s;
+    text-transform: uppercase; display: flex; align-items: center;
+    justify-content: center; gap: 8px; }
+  .btn-vip:hover { opacity: .85; }
+  .btn-vip:disabled { opacity: .4; cursor: not-allowed; }
+  #vip-corridors { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .vip-card { background: rgba(201,162,39,.08); border: 1px solid rgba(201,162,39,.4);
+    border-radius: 6px; padding: 8px 10px; font-size: 11px; font-family: var(--font-mono); }
+  .vip-card .v-id { color: var(--vip-light); font-weight: 700; font-size: 12px; }
+  .vip-card .v-path { color: var(--muted); margin: 3px 0; }
+  .vip-pos-bar { margin-top: 6px; height: 4px; background: rgba(201,162,39,.15);
+    border-radius: 2px; overflow: hidden; }
+  .vip-pos-fill { height: 100%; background: var(--vip-light); border-radius: 2px;
+    transition: width 0.6s linear; }
+  .vip-cur-junc { font-size: 10px; color: var(--vip-light); margin-top: 4px;
+    display: flex; align-items: center; gap: 4px; }
+  /* VIP junction lockdown glow in sidebar */
+  .sig-light.vip-red { background: #ff0033; box-shadow: 0 0 12px #ff0033;
+    animation: vip-lock 0.6s ease-in-out infinite; }
+  @keyframes vip-lock {
+    0%,100% { opacity:1; box-shadow: 0 0 10px #ff0033; }
+    50%      { opacity:.5; box-shadow: 0 0 22px #ff0033; }
+  }
+  .junction-card.vip-active { border-left: 2px solid var(--vip-light) !important;
+    background: rgba(201,162,39,.07) !important; }
+
+  /* VIP convoy marker */
+  .vip-convoy-icon { filter: drop-shadow(0 0 10px #c9a227) drop-shadow(0 0 20px #8b6914); }
+  @keyframes vip-beacon { 0%,100%{filter:drop-shadow(0 0 10px #c9a227) drop-shadow(0 0 22px #8b6914);}
+    50%{filter:drop-shadow(0 0 18px #f0c040) drop-shadow(0 0 32px #c9a227);} }
+  .vip-convoy-icon { animation: vip-beacon 1s ease-in-out infinite; }
+
+  /* Priority junction pulse ring */
+  @keyframes priority-ring {
+    0%   { stroke-opacity: 1;  r: 14; }
+    100% { stroke-opacity: 0;  r: 28; }
+  }
+
+  /* Corridor card upgrade */
+  .amb-pos-bar { margin-top: 6px; height: 4px; background: rgba(255,153,0,.15);
+    border-radius: 2px; overflow: hidden; }
+  .amb-pos-fill { height: 100%; background: var(--amber); border-radius: 2px;
+    transition: width 0.5s linear; }
+  .amb-cur-junc { font-size: 10px; color: var(--amber); margin-top: 4px;
+    display: flex; align-items: center; gap: 4px; }
+
+  /* ML prediction indicator */
+  .pred-rising  { color: #ff3b5c; }
+  .pred-falling { color: #00ff88; }
+  .pred-stable  { color: var(--muted); }
+  .pred-bar { display:inline-block; height:6px; border-radius:3px; vertical-align:middle; margin-left:4px; }
+  /* Proactive signal badge on junction card */
+  .proactive-badge { display:inline-block; font-size:9px; font-family:var(--font-mono);
+    background:rgba(255,165,0,.15); color:orange; border:1px solid rgba(255,165,0,.3);
+    border-radius:3px; padding:1px 5px; margin-left:4px; vertical-align:middle; }
+
+  /* Hardware junction badge */
+  .hw-badge { display:inline-block; font-size:9px; font-family:var(--font-mono);
+    background:rgba(0,255,136,.12); color:#00ff88; border:1px solid rgba(0,255,136,.3);
+    border-radius:3px; padding:1px 5px; margin-left:4px; vertical-align:middle; }
+  .junction-card.hw-active { border-left: 2px solid #00ff88 !important;
+    background: rgba(0,255,136,.04) !important; }
+
+  /* Upstream feeder blocked — orange tint */
+  .junction-card.upstream-blocked { border-left: 2px solid #ff6600 !important;
+    background: rgba(255,102,0,.05) !important; }
+  .sig-light.upstream-blocked { background: #ff6600; box-shadow: 0 0 6px #ff6600; opacity:.75; }
+  .road-sig-dot.upstream-blocked { background: #ff6600; box-shadow: 0 0 4px #ff6600; opacity:.75; }
+
+  /* ── Rupali Jam Simulation button ─────────────────────────────────────── */
+  .jam-box { padding: 16px; }
+  .btn-jam-activate {
+    width: 100%; padding: 11px;
+    background: linear-gradient(135deg, #ff1744, #b71c1c);
+    border: 1px solid #ff1744; border-radius: 6px; color: #fff;
+    font-family: var(--font-display); font-size: 14px; font-weight: 700;
+    letter-spacing: 1px; cursor: pointer; transition: all .2s;
+    text-transform: uppercase; display: flex; align-items: center;
+    justify-content: center; gap: 8px; }
+  .btn-jam-activate:hover  { opacity: .85; transform: scale(1.01); }
+  .btn-jam-activate:disabled { opacity: .35; cursor: not-allowed; transform: none; }
+  .btn-jam-cancel {
+    width: 100%; padding: 9px; margin-top: 8px;
+    background: rgba(255,200,0,.08); border: 1px solid rgba(255,200,0,.35);
+    color: #ffd700; border-radius: 6px; font-family: var(--font-display);
+    font-size: 13px; font-weight: 700; letter-spacing: 1px; cursor: pointer;
+    transition: all .2s; text-transform: uppercase;
+    display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .btn-jam-cancel:hover { background: rgba(255,200,0,.18); }
+  .jam-status-banner {
+    margin-top: 10px; padding: 8px 10px; border-radius: 6px;
+    font-size: 11px; font-family: var(--font-mono); display: none;
+    border-left: 3px solid #ff1744;
+    background: rgba(255,23,68,.08); color: #ff5370;
+  }
+  .jam-status-banner.active {
+    display: block;
+    animation: jam-blink-border 1s step-start infinite;
+  }
+  @keyframes jam-blink-border {
+    0%,49%  { border-left-color: #ff1744; }
+    50%,100%{ border-left-color: #ff8f00; }
+  }
+  .jam-hint { font-size: 10px; color: var(--muted); margin-top: 8px;
+    font-family: var(--font-mono); line-height: 1.5; }
+
+  /* Rich hover tooltip on map markers */
+  .traffic-tooltip {
+    background: #0b1826 !important;
+    border: 1px solid #1e3a5f !important;
+    border-radius: 8px !important;
+    padding: 10px 12px !important;
+    box-shadow: 0 4px 24px rgba(0,0,0,.85) !important;
+    max-width: 320px !important;
+    min-width: 240px !important;
+    width: max-content !important;
+    overflow: visible !important;
+    white-space: normal !important;
+    pointer-events: none;
+  }
+  .traffic-tooltip::before { display: none !important; }
+  .leaflet-tooltip-top.traffic-tooltip::before { display: none !important; }
+
+  #toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface2);
+    border: 1px solid var(--accent); border-radius: 8px; padding: 12px 16px;
+    font-size: 13px; color: var(--text); z-index: 9999; opacity: 0; transform: translateY(8px);
+    transition: all .3s; pointer-events: none; }
+  #toast.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><span class="logo-icon">🚦</span>Surat <span>&nbsp;Smart Traffic</span></div>
+  <div class="header-meta">
+    <div class="live-badge"><div class="live-dot"></div> Live</div>
+    <div id="traffic-period">--</div>
+    <div>Junctions: <strong style="color:var(--text)" id="hdr-count">--</strong></div>
+    <div>Updates: <strong style="color:var(--text)">1s</strong></div>
+    <div id="clock">--:--:--</div>
+  </div>
+</header>
+
+<aside id="sidebar">
+  <div class="section-label">🗺 Intersections</div>
+  <div id="junction-list"></div>
+</aside>
+
+<div id="map-container"><div id="map"></div></div>
+
+<aside id="panel">
+  <div class="section-label">🚑 Ambulance Corridor</div>
+  <div class="amb-box">
+    <div class="form-group">
+      <label>Ambulance From</label>
+      <select id="amb-from">
+        {% for jid, j in junctions.items() %}<option value="{{ jid }}">{{ j.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Ambulance To</label>
+      <select id="amb-to">
+        {% for jid, j in junctions.items() %}<option value="{{ jid }}" {% if loop.last %}selected{% endif %}>{{ j.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <button class="btn-amb" id="btn-activate-amb" onclick="activateCorridor()">
+      🚑 Activate Green Corridor
+    </button>
+    <!-- ETA Comparison panel — shown after activation -->
+    <div id="eta-box" style="display:none;margin-top:10px;background:rgba(255,153,0,.07);
+         border:1px solid rgba(255,153,0,.25);border-radius:6px;padding:10px;font-size:11px;
+         font-family:var(--font-mono)">
+      <div style="color:#ff9900;font-weight:700;margin-bottom:6px;font-size:12px">⏱ ETA Comparison</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <div style="background:rgba(255,59,92,.1);border-radius:4px;padding:6px;text-align:center">
+          <div style="color:#ff3b5c;font-size:16px;font-weight:700" id="eta-normal">--</div>
+          <div style="color:var(--muted);font-size:9px;margin-top:2px">NORMAL TIME</div>
+        </div>
+        <div style="background:rgba(0,255,136,.1);border-radius:4px;padding:6px;text-align:center">
+          <div style="color:#00ff88;font-size:16px;font-weight:700" id="eta-corridor">--</div>
+          <div style="color:var(--muted);font-size:9px;margin-top:2px">CORRIDOR TIME</div>
+        </div>
+      </div>
+      <div style="margin-top:8px;text-align:center;padding:5px;background:rgba(255,153,0,.1);border-radius:4px">
+        <span style="color:#ff9900;font-weight:700;font-size:14px" id="eta-saved">--%</span>
+        <span style="color:var(--muted);font-size:10px"> TIME SAVED</span>
+      </div>
+    </div>
+    <div id="amb-corridors"></div>
+  </div>
+
+  <div class="section-label">👑 VIP Convoy Corridor</div>
+  <div class="vip-box">
+    <div class="form-group">
+      <label>Convoy From</label>
+      <select id="vip-from">
+        {% for jid, j in junctions.items() %}<option value="{{ jid }}">{{ j.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Convoy To</label>
+      <select id="vip-to">
+        {% for jid, j in junctions.items() %}<option value="{{ jid }}" {% if loop.last %}selected{% endif %}>{{ j.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <button class="btn-vip" id="btn-activate-vip" onclick="activateVipCorridor()">
+      👑 Deploy VIP Convoy
+    </button>
+    <div id="vip-corridors"></div>
+  </div>
+
+  <div class="section-label">🔍 Route Finder</div>
+  <div class="route-box">
+    <div class="form-group">
+      <label>From</label>
+      <select id="sel-from">
+        {% for jid, j in junctions.items() %}<option value="{{ jid }}">{{ j.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>To</label>
+      <select id="sel-to">
+        {% for jid, j in junctions.items() %}<option value="{{ jid }}" {% if loop.last %}selected{% endif %}>{{ j.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <button class="btn-find" onclick="findRoute()">⚡ Find Best Route</button>
+    <div id="route-reroute-notice" style="display:none;margin-top:6px;font-size:10px;
+         color:#ff9900;font-family:var(--font-mono);text-align:center;
+         background:rgba(255,153,0,.1);border-radius:4px;padding:4px 8px">
+      🔄 Rerouting due to traffic...
+    </div>
+    <div id="route-result"></div>
+  </div>
+
+  <div class="section-label">🚨 Traffic Jam Simulation</div>
+  <div class="jam-box">
+    <div class="jam-hint">Force <strong style="color:#ff5370">extreme congestion</strong> at Rupali Canal. If a route is active, the system will <strong style="color:#00ff88">automatically reroute</strong> away from the jam — no button click needed.</div>
+    <button class="btn-jam-activate" id="btn-jam-activate" onclick="triggerRupaliJam()" style="margin-top:10px">
+      🚨 Simulate Rupali Canal JAM
+    </button>
+    <button class="btn-jam-cancel" id="btn-jam-cancel" onclick="cancelRupaliJam()" style="display:none">
+      ✕ Cancel &mdash; Normalise Traffic
+    </button>
+    <div class="jam-status-banner" id="jam-status-banner">
+      <strong>⚠️ JAM ACTIVE</strong> — Rupali Canal is overloaded.<br>
+      <span id="jam-status-detail">Auto-rerouting active route away from jam…</span>
+    </div>
+  </div>
+
+  <div class="section-label">📊 Network Stats</div>
+  <div class="stats-grid">
+    <div class="stat-card"><span class="s-val" id="stat-avg">--</span><span class="s-lbl">Avg Vehicles</span></div>
+    <div class="stat-card"><span class="s-val" id="stat-high">--</span><span class="s-lbl">High Traffic</span></div>
+    <div class="stat-card"><span class="s-val" id="stat-low">--</span><span class="s-lbl">Low Traffic</span></div>
+    <div class="stat-card"><span class="s-val" id="stat-free">--</span><span class="s-lbl">Free Roads</span></div>
+  </div>
+
+  <div class="section-label">🚦 Junction Signals</div>
+  <div id="junction-detail">
+    <h4 id="detail-name">--</h4>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:6px" id="detail-sub">Select a junction</div>
+    <div class="detail-road-list" id="detail-road-list"></div>
+  </div>
+
+  <div class="section-label">🧠 ML Signal Predictions</div>
+  <div id="ml-panel" style="padding:0 16px 16px">
+    <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-bottom:8px">
+      Predicting 45s ahead · updates every second
+    </div>
+    <div id="ml-predictions" style="display:flex;flex-direction:column;gap:5px">
+      <div style="font-size:11px;color:var(--muted)">Loading predictions...</div>
+    </div>
+  </div>
+
+  <div class="section-label">🎨 Legend</div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-arrow" style="color:#00ff88">➤</span> Green signal road</div>
+    <div class="legend-item"><span class="legend-arrow" style="color:#ffd700">➤</span> Yellow signal road</div>
+    <div class="legend-item"><span class="legend-arrow" style="color:#ff3b5c">➤</span> Red signal road</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#00ff88"></div> Low traffic (&lt;20 veh)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:orange"></div> Medium (20–60 veh)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ff3b5c"></div> High (&gt;60 veh)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div> Selected Route</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ff9900;animation:amb-pulse .8s infinite"></div> 🚑 Ambulance Corridor</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#c9a227;animation:vip-beacon 1s infinite"></div> 👑 VIP Convoy (All RED)</div>
+  </div>
+</aside>
+
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── Map Init ─────────────────────────────────────────────────────────────────
+const map = L.map('map', { center: [21.168, 72.800], zoom: 13 });
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© CartoDB · Surat Smart Traffic', maxZoom: 18,
+}).addTo(map);
+
+// ── State ────────────────────────────────────────────────────────────────────
+let state       = {};
+let markers     = {};
+let arrowLayers = {};   // jid → array of arrow polylines
+let roadLines   = [];
+let routeLayer  = null;
+let selectedJid = 'athwa_gate';
+let initialized = false;
+
+// ── Ambulance Corridor State ──────────────────────────────────────────────────
+let corridorLayers   = {};   // cid → { pathLayer, junctionLayers[], ambMarker, priorityRings[] }
+let activeCorridors  = [];   // current corridor records from API
+let ambAnimFrames    = {};   // cid → requestAnimationFrame id for smooth movement
+
+// ── VIP Convoy State ──────────────────────────────────────────────────────────
+let vipLayers        = {};   // cid → { pathLayer, convoyMarkers[], priorityRings[] }
+let activeVipCorridors = [];
+
+const ROADS = [
+  ["vr_mall","rr-mall"],["rr-mall","big_bazaar"],["big_bazaar","kargil_chowk"],
+  ["kargil_chowk","svnit"],["rr-mall","avadh_arkelia"],["big_bazaar","sangini_edge"],
+  ["kargil_chowk","someshwar_cir"],["svnit","jani_locha"],["jani_locha","parle_point"],
+  ["parle_point","amrut_fashion"],["amrut_fashion","sarvajanik"],["sarvajanik","athwa_gate"],
+  ["athwa_gate","iti"],["iti","civil_hospital"],["iti","poddar_plaza"],
+  ["civil_hospital","sosyo_cir"],["vr_mall","avadh_arkelia"],["avadh_arkelia","sangini_edge"],
+  ["sangini_edge","someshwar_cir"],["someshwar_cir","anuvrat_dwar"],
+  ["anuvrat_dwar","breadliner_cir"],["breadliner_cir","bharat_char_rasta"],
+  ["bharat_char_rasta","navjvan_cir"],["navjvan_cir","sosyo_cir"],
+  ["amaazia_waterpark_cir","anuvrat_dwar"],["amaazia_waterpark_cir","jani_locha"],
+  ["anuvrat_dwar","vesu_police_st"],["breadliner_cir","vesu_police_st"],
+  ["kp_group_cir","vesu_police_st"],["kp_group_cir","rupali_canal"],
+  ["rupali_canal","canal_bhatar-rd_cir"],["sai_dham_canal","canal_bhatar-rd_cir"],
+  ["amaazia_waterpark_cir","rangila_park"],["parle_point","rangila_park"],
+  ["ram_chowk","rangila_park"],["kp_group_cir","rangila_park"],
+  ["ram_chowk","poddar_plaza"],["ram_chowk","rupali_canal"],
+  ["poddar_plaza","canal_bhatar-rd_cir"],["poddar_plaza","sai_dham_canal"],
+  ["bharat_char_rasta","rupali_canal"],["bharat_char_rasta","canal_bhatar-rd_cir"],
+  ["navjvan_cir","sai_dham_canal"],["iti","poddar_plaza"],
+];
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function vehicleColor(v) {
+  if (v < 20) return '#00ff88';
+  if (v < 60) return '#ff8c00';
+  return '#ff3b5c';
+}
+
+function phaseToLights(phase) {
+  return { r: phase === 'red', y: phase === 'yellow', g: phase === 'green' };
+}
+
+function activePhase(info) {
+  return info.phase;
+}
+
+function trafficPeriodLabel() {
+  const now = new Date();
+  const h = now.getHours();
+  const isWE = now.getDay() === 0 || now.getDay() === 6;
+  const day = isWE ? 'Weekend' : 'Weekday';
+  let period;
+  if (h >= 8  && h < 10)  period = '🔴 Morning Peak';
+  else if (h >= 17 && h < 20) period = '🔴 Evening Peak';
+  else if (h >= 12 && h < 14 && !isWE) period = '🟡 Lunch Hour';
+  else if (h >= 12 && h < 15 && isWE)  period = '🟡 Weekend Leisure';
+  else if (h >= 22 || h < 6) period = '🟢 Night (Low)';
+  else period = '🟡 Normal';
+  return `${day} · ${period}`;
+}
+
+// ── Map marker: realistic separate signal pole + timer plate ─────────────────
+//
+//   ┌──────────┐   signal head (black housing, 3 lights)
+//   │  ● red   │
+//   │  ● yel   │
+//   │  ● grn   │
+//   └──────────┘
+//       │           pole
+//   ┌───────┐       timer plate (separate board, like real countdown signs)
+//   │  18s  │
+//   └───────┘
+//       │
+//      ═══          base
+
+function makeJunctionIcon(info) {
+  const phase     = info.phase;
+  const countdown = info.countdown;
+  const isAmb     = info.ambulance === true;
+  const isVip     = info.vip === true;
+
+  // VIP lockdown: ALL red, pulsing gold border
+  // Ambulance corridor: amber override on green light
+  const Rfill = (phase === 'red' || isVip) ? '#ff2d2d' : '#3a0000';
+  const Yfill = phase === 'yellow' ? '#ffd000' : '#2a1f00';
+  const Gfill = isAmb ? '#ff9900' : (phase === 'green' && !isVip ? '#00e87a' : '#002510');
+
+  const Rbright = (phase === 'red' || isVip);
+  const Ybright = (phase === 'yellow' && !isVip);
+  const Gbright = (phase === 'green' && !isVip && !isAmb);
+
+  const housingStroke = isVip ? '#c9a227' : (isAmb ? '#cc7700' : '#3a3a3a');
+  const housingFill   = isVip ? '#1a1200' : (isAmb ? '#1e1200' : '#1c1c1c');
+
+  const timerBg  = isVip        ? '#1a1000'  :
+                   isAmb        ? '#2a1500'  :
+                   phase === 'green'  ? '#002a14' :
+                   phase === 'yellow' ? '#2a1e00' : '#2a0005';
+  const timerClr = isVip        ? '#c9a227'  :
+                   isAmb        ? '#ff9900'  :
+                   phase === 'green'  ? '#00e87a' :
+                   phase === 'yellow' ? '#ffd000' : '#ff2d2d';
+
+  const timerText = isVip ? 'VIP' : `${countdown}s`;
+
+  const W  = 32;
+  const cx = 16;
+
+  const filterR = Rbright ? 'filter="url(#sfr)"' : '';
+  const filterY = Ybright ? 'filter="url(#sfy)"' : '';
+  const filterG = Gbright ? 'filter="url(#sfg)"' : '';
+
+  const strokeR = Rbright ? '#ff4444' : '#2a0000';
+  const strokeY = Ybright ? '#ccaa00' : '#221500';
+  const strokeG = isAmb   ? '#cc7700' : (Gbright ? '#00cc66' : '#003318');
+
+  // Ambulance/VIP pulsing glow filter
+  const ambFilter = (isAmb || isVip) ? `
+    <filter id="sfamb" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>` : '';
+  const filterGreen = isAmb ? 'filter="url(#sfamb)"' : filterG;
+  const filterRedVip = isVip ? 'filter="url(#sfamb)"' : filterR;
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="96" viewBox="0 0 ${W} 96">
+  <defs>
+    <filter id="sfr" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="sfy" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="sfg" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>${ambFilter}
+  </defs>
+
+  <!-- Signal head housing -->
+  <rect x="7" y="1" width="19" height="50" rx="3" fill="${housingFill}" stroke="${housingStroke}" stroke-width="1"/>
+  <rect x="8"  y="4"  width="16" height="2.5" rx="1" fill="#0a0a0a"/>
+  <rect x="8"  y="19" width="16" height="2.5" rx="1" fill="#0a0a0a"/>
+  <rect x="8"  y="34" width="16" height="2.5" rx="1" fill="#0a0a0a"/>
+
+  <!-- RED light -->
+  <circle cx="${cx}" cy="11" r="6.5" fill="${Rfill}" ${isVip ? filterRedVip : filterR} stroke="${strokeR}" stroke-width="0.6"/>
+  <!-- YELLOW light -->
+  <circle cx="${cx}" cy="26" r="6.5" fill="${Yfill}" ${filterY} stroke="${strokeY}" stroke-width="0.6"/>
+  <!-- GREEN / AMBER light -->
+  <circle cx="${cx}" cy="41" r="6.5" fill="${Gfill}" ${filterGreen} stroke="${strokeG}" stroke-width="0.6"/>
+
+  ${isAmb ? `<!-- Ambulance cross badge -->
+  <rect x="10" y="2.5" width="12" height="5" rx="1" fill="#ff9900" opacity="0.9"/>
+  <text x="${cx}" y="6.5" text-anchor="middle" font-size="4.5" font-weight="700" fill="#000" font-family="sans-serif">AMB</text>` : ''}
+  ${isVip ? `<!-- VIP crown badge -->
+  <rect x="9" y="2.5" width="14" height="5" rx="1" fill="#c9a227" opacity="0.95"/>
+  <text x="${cx}" y="6.5" text-anchor="middle" font-size="4" font-weight="700" fill="#000" font-family="sans-serif">👑VIP</text>` : ''}
+
+  <!-- Pole -->
+  <rect x="14.5" y="47" width="3" height="13" fill="#505050"/>
+
+  <!-- Timer plate -->
+  <rect x="5" y="60" width="22" height="18" rx="3"
+        fill="${timerBg}" stroke="${housingStroke}" stroke-width="1.4"/>
+  <rect x="6.5" y="61.5" width="19" height="15" rx="2"
+        fill="none" stroke="#3a3a3a" stroke-width="0.3" opacity="0.4"/>
+  <text x="${cx}" y="73.5"
+        text-anchor="middle"
+        font-family="'JetBrains Mono',Courier,monospace"
+        font-size="${isVip ? '7' : '9.5'}" font-weight="700"
+        fill="${timerClr}">${timerText}</text>
+
+  <!-- Base -->
+  <rect x="14.5" y="78" width="3" height="12" fill="#505050"/>
+  <rect x="9" y="90" width="14" height="4" rx="1.5" fill="#666"/>
+  <rect x="12" y="93" width="8"  height="2" rx="1"   fill="#888"/>
+</svg>`;
+
+  return L.divIcon({
+    className: '',
+    html: svg,
+    iconSize:   [W, 96],
+    iconAnchor: [cx, 96],
+    popupAnchor:[0, -100],
+  });
+}
+
+// ── Road arrows: one arrow polyline per road, colour = signal phase ──────────
+// Each junction owns arrows pointing along its active green road(s).
+// We draw a short offset arrow in the middle of each road segment.
+function getArrowColor(phaseA, phaseB) {
+  // The road between A and B:
+  // If A's signal toward B is green → green arrow toward B
+  // If B's signal toward A is green → green arrow toward A
+  // We draw from each junction's perspective independently
+  return null; // arrows are drawn per-junction not per-road
+}
+
+// Draw arrows FROM junction JID along each of its road's current signal
+function buildArrowsForJunction(jid, info, stateData) {
+  const arrows = [];
+  const roads  = info.road_signals || [];
+  const jLat   = info.lat;
+  const jLng   = info.lng;
+  const isAmb  = info.ambulance === true;
+
+  roads.forEach(rs => {
+    const nb = stateData[rs.road_to];
+    if (!nb) return;
+
+    const frac   = 0.30;
+    const midLat = jLat + (nb.lat - jLat) * frac;
+    const midLng = jLng + (nb.lng - jLng) * frac;
+
+    // Ambulance corridor road → amber arrow regardless of phase
+    const isCorridorRoad = isAmb && rs.phase === 'green';
+    const col     = isCorridorRoad ? '#ff9900' :
+                    rs.phase === 'green'  ? '#00ff88' :
+                    rs.phase === 'yellow' ? '#ffd700' : '#ff3b5c';
+    const opacity = rs.phase === 'red' ? 0.75 : 0.90;
+    const weight  = isCorridorRoad ? 5 : (rs.phase === 'green' ? 3.5 : 3);
+
+    const arrow = L.polyline([[jLat, jLng], [midLat, midLng]], {
+      color: col, weight, opacity,
+    }).addTo(map);
+    arrows.push(arrow);
+  });
+  return arrows;
+}
+
+// ── Markers ──────────────────────────────────────────────────────────────────
+function initMarkers(data) {
+  // Base road lines — permanent neutral background
+  ROADS.forEach(([a, b]) => {
+    if (!data[a] || !data[b]) return;
+    const line = L.polyline([
+      [data[a].lat, data[a].lng],
+      [data[b].lat, data[b].lng],
+    ], { color: '#1e2d45', weight: 2.5, opacity: 0.55 }).addTo(map);
+    roadLines.push({ line, a, b });
+  });
+
+  // Arrows + junction icons
+  Object.entries(data).forEach(([jid, info]) => {
+    arrowLayers[jid] = buildArrowsForJunction(jid, info, data);
+
+    const m = L.marker([info.lat, info.lng], {
+      icon: makeJunctionIcon(info),
+      zIndexOffset: 200,
+    }).addTo(map);
+    m.bindTooltip(() => tooltipFor(jid, info), { permanent: false, direction: 'top', sticky: false, className: 'traffic-tooltip', offset: [0, -100] });
+    m.on('click', () => selectJunction(jid));
+    markers[jid] = m;
+  });
+
+  document.getElementById('hdr-count').textContent = Object.keys(data).length;
+}
+
+function tooltipFor(jid, info) {
+  const roads = info.road_signals || [];
+  // Build per-road rows for the rich hover panel
+  const rows = roads.map(rs => {
+    const col   = rs.phase === 'green'  ? '#00e87a' :
+                  rs.phase === 'yellow' ? '#ffd000' : '#ff3b5c';
+    const arrow = rs.phase === 'green'  ? '▶' :
+                  rs.phase === 'yellow' ? '◆' : '●';
+    const cdTxt = rs.phase !== 'red' ? ` ${rs.countdown}s` : '';
+    const vc    = rs.vehicles < 20 ? '#00e87a' : rs.vehicles < 60 ? '#ff8c00' : '#ff3b5c';
+    // Connected road name: single line, ellipsis if too long
+    const shortName = rs.road_to_name.replace(/circle|chowk|junction|college/gi,'').trim();
+    return `<tr>
+      <td style="color:${col};padding:1px 4px 1px 0;font-size:9px;white-space:nowrap">${arrow}</td>
+      <td style="color:#d0d8e8;padding:1px 3px;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px">${shortName}</td>
+      <td style="color:${col};padding:1px 3px;font-size:9px;font-weight:700;white-space:nowrap">${rs.phase.toUpperCase()}${cdTxt}</td>
+      <td style="color:${vc};padding:1px 0 1px 3px;font-size:9px;white-space:nowrap">🚗${rs.vehicles}v</td>
+    </tr>`;
+  }).join('');
+
+  return `<div style="font-family:'JetBrains Mono',monospace;width:max-content;max-width:260px;box-sizing:border-box">
+    <div style="font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;color:#00d4ff;margin-bottom:5px;border-bottom:1px solid #1e3050;padding-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:clip">${info.name}</div>
+    <table style="border-collapse:collapse;width:100%;table-layout:fixed">${rows}</table>
+    <div style="margin-top:5px;border-top:1px solid #1e3050;padding-top:3px;display:flex;gap:8px;font-size:9px;color:#64748b;white-space:nowrap">
+      <span>🚦${roads.length}</span>
+      <span>🚗${info.vehicles}v avg</span>
+      <span>⏱${info.countdown}s</span>
+    </div>
+  </div>`;
+}
+
+function updateMarkers(data) {
+  Object.entries(data).forEach(([jid, info]) => {
+    if (!markers[jid]) return;
+    markers[jid].setIcon(makeJunctionIcon(info));
+    markers[jid].setTooltipContent(() => tooltipFor(jid, info));
+
+    // Remove old arrows for this junction, redraw
+    (arrowLayers[jid] || []).forEach(l => map.removeLayer(l));
+    arrowLayers[jid] = buildArrowsForJunction(jid, info, data);
+  });
+}
+
+// ── Sidebar ──────────────────────────────────────────────────────────────────
+function renderSidebar(data) {
+  const container = document.getElementById('junction-list');
+  if (!container._built) {
+    container._built = true;
+    Object.entries(data).forEach(([jid, info]) => {
+      const card = document.createElement('div');
+      card.className = 'junction-card' + (jid === selectedJid ? ' active' : '');
+      card.id = 'card-' + jid;
+      card.onclick = () => selectJunction(jid);
+
+      const roadRows = (info.road_signals || []).slice(0, 6).map((rs, i) =>
+        `<div class="road-signal-row" id="rsr-${jid}-${i}">
+          <div class="road-sig-lights">
+            <div class="road-sig-dot off" id="rsd-r-${jid}-${i}"></div>
+            <div class="road-sig-dot off" id="rsd-y-${jid}-${i}"></div>
+            <div class="road-sig-dot off" id="rsd-g-${jid}-${i}"></div>
+          </div>
+          <span class="road-name" id="rsn-${jid}-${i}">${rs.road_to_name}</span>
+          <span class="road-vehs" id="rsv-${jid}-${i}" style="color:${vehicleColor(rs.vehicles||0)}">${rs.vehicles||0}v</span>
+          <span class="road-cd"   id="rscd-${jid}-${i}">${rs.phase !== 'red' ? rs.countdown+'s' : ''}</span>
+        </div>`
+      ).join('');
+
+      card.innerHTML = `
+        <div class="card-top">
+          <div class="signal-tower" style="height:${Math.max(38, (info.road_signals||[]).length * 12 + 10)}px">
+            <div class="sig-light off" id="sl-r-${jid}"></div>
+            <div class="sig-light off" id="sl-y-${jid}"></div>
+            <div class="sig-light off" id="sl-g-${jid}"></div>
+          </div>
+          <div class="junc-info">
+            <div class="junc-name">${info.name}</div>
+            <div class="junc-meta" id="meta-${jid}">--</div>
+            <span class="countdown-badge" id="cd-${jid}">--</span>
+          </div>
+          <div class="veh-wrap">
+            <div class="veh-val" id="vv-${jid}" style="color:var(--muted)">--</div>
+            <div class="veh-bar"><div class="veh-fill" id="vf-${jid}"></div></div>
+          </div>
+        </div>
+        ${roadRows ? `<div class="road-signals">${roadRows}</div>` : ''}`;
+      container.appendChild(card);
+    });
+  }
+
+  // Update all values
+  Object.entries(data).forEach(([jid, info]) => {
+    const phase  = activePhase(info);
+    const { r, y, g } = phaseToLights(phase);
+    const isAmb      = info.ambulance === true;
+    const isVip      = info.vip === true;
+    const isUpstream = info.upstream_blocked === true;
+    const isHW       = info.hardware === true;
+
+    const card = document.getElementById('card-' + jid);
+    if (card) {
+      if (isAmb)       { card.classList.add('amb-active');  card.classList.remove('vip-active'); }
+      else if (isVip)  { card.classList.add('vip-active');  card.classList.remove('amb-active'); }
+      else             { card.classList.remove('amb-active'); card.classList.remove('vip-active'); }
+    }
+
+    const setLight = (id, cls) => { const el = document.getElementById(id); if (el) el.className = 'sig-light ' + cls; };
+    // VIP lockdown: all lights red-pulsing
+    const redCls   = isVip ? 'vip-red' : (r ? 'on-red' : 'off');
+    setLight(`sl-r-${jid}`, redCls);
+    setLight(`sl-y-${jid}`, isVip ? 'off' : (y ? 'on-yellow' : 'off'));
+    const greenCls = isVip ? 'off' : (isAmb ? 'amb-green' : (g && info.blinking) ? 'blink-green' : (g ? 'on-green' : 'off'));
+    setLight(`sl-g-${jid}`, greenCls);
+
+    const phaseLabel = isVip ? '👑 VIP Lockdown' : (isAmb ? '🚑 Corridor' : phase === 'green' ? '🟢 Green' : phase === 'yellow' ? '🟡 Yellow' : '🔴 Red');
+    const phaseColor = isVip ? '#c9a227' : (isAmb ? '#ff9900' : '');
+    const meta = document.getElementById(`meta-${jid}`);
+    if (meta) { meta.innerHTML = phaseLabel + (isHW ? ' <span class="hw-badge">&#128225; LIVE</span>' : ''); meta.style.color = phaseColor; }
+
+    const cd = document.getElementById(`cd-${jid}`);
+    if (cd) {
+      if (isVip)  cd.textContent = `${info.vip_expires_in}s lockdown`;
+      else if (isAmb) cd.textContent = `${info.amb_expires_in}s corridor`;
+      else        cd.textContent = `${info.countdown}s remaining`;
+    }
+
+    const vc = vehicleColor(info.vehicles);
+    const vv = document.getElementById(`vv-${jid}`);
+    if (vv) { vv.textContent = `${info.vehicles} veh`; vv.style.color = vc; }
+    const vf = document.getElementById(`vf-${jid}`);
+    if (vf) { vf.style.width = `${Math.min(100, (info.vehicles / 120) * 100)}%`; vf.style.background = vc; }
+
+    (info.road_signals || []).slice(0, 6).forEach((rs, i) => {
+      const { r: rr, y: ry, g: rg } = phaseToLights(rs.phase);
+      const setDot = (id, cls) => { const el = document.getElementById(id); if (el) el.className = 'road-sig-dot ' + cls; };
+      // VIP: all dots show red
+      setDot(`rsd-r-${jid}-${i}`, (isVip || rr) ? 'on-red' : 'off');
+      setDot(`rsd-y-${jid}-${i}`, isVip ? 'off' : (ry ? 'on-yellow' : 'off'));
+      const rdGreenCls = isVip ? 'off' : ((isAmb && rg) ? 'blink-green' : (rg && info.blinking) ? 'blink-green' : (rg ? 'on-green' : 'off'));
+      setDot(`rsd-g-${jid}-${i}`, rdGreenCls);
+
+      const cdEl = document.getElementById(`rscd-${jid}-${i}`);
+      if (cdEl) cdEl.textContent = (isVip || rs.phase === 'red') ? '' : rs.countdown + 's';
+
+      const vEl = document.getElementById(`rsv-${jid}-${i}`);
+      if (vEl) { vEl.textContent = (rs.vehicles || 0) + 'v'; vEl.style.color = vehicleColor(rs.vehicles || 0); }
+    });
+  });
+}
+
+function selectJunction(jid) {
+  selectedJid = jid;
+  document.querySelectorAll('.junction-card').forEach(c => c.classList.remove('active'));
+  const card = document.getElementById('card-' + jid);
+  if (card) { card.classList.add('active'); card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+  if (markers[jid]) map.panTo(markers[jid].getLatLng(), { animate: true });
+  updateDetailPanel();
+}
+
+// ── Right Panel Detail ────────────────────────────────────────────────────────
+function updateDetailPanel() {
+  const info = state[selectedJid];
+  if (!info) return;
+
+  const detail = document.getElementById('junction-detail');
+  detail.style.display = 'block';
+  document.getElementById('detail-name').textContent = info.name;
+
+  const roads = info.road_signals || [];
+  document.getElementById('detail-sub').textContent =
+    `${roads.length} road(s) · ${info.vehicles} avg veh · ${info.countdown}s to change`;
+
+  const list = document.getElementById('detail-road-list');
+  list.innerHTML = roads.map(rs => {
+    const { r, y, g } = phaseToLights(rs.phase);
+    const badgeCls = rs.phase === 'green' ? 'badge-green' : rs.phase === 'yellow' ? 'badge-yellow' : 'badge-red';
+    const cdText   = rs.phase !== 'red' ? ` · ${rs.countdown}s` : '';
+    return `<div class="detail-road-item">
+      <div class="detail-road-lights">
+        <div class="detail-road-dot ${r ? 'on-red'    : 'off'}"></div>
+        <div class="detail-road-dot ${y ? 'on-yellow' : 'off'}"></div>
+        <div class="detail-road-dot ${g ? 'on-green'  : 'off'}"></div>
+      </div>
+      <span class="detail-road-name">→ ${rs.road_to_name}</span>
+      <span class="detail-road-badge ${badgeCls}">${rs.phase.toUpperCase()}${cdText}</span>
+      <span style="font-family:var(--font-mono);font-size:10px;color:${vehicleColor(rs.vehicles||0)};margin-left:auto">${rs.vehicles||0}v</span>
+    </div>`;
+  }).join('');
+}
+
+// ── Stats ────────────────────────────────────────────────────────────────────
+function updateStats(data) {
+  const vehs = Object.values(data).map(d => d.vehicles);
+  const avg  = Math.round(vehs.reduce((a, b) => a + b, 0) / vehs.length);
+  document.getElementById('stat-avg').textContent  = avg;
+  document.getElementById('stat-high').textContent = vehs.filter(v => v >= 60).length;
+  document.getElementById('stat-low').textContent  = vehs.filter(v => v < 20).length;
+  document.getElementById('stat-free').textContent = vehs.filter(v => v < 40).length;
+}
+
+// ── Ambulance Corridor ────────────────────────────────────────────────────────
+
+async function activateCorridor() {
+  const from = document.getElementById('amb-from').value;
+  const to   = document.getElementById('amb-to').value;
+  if (from === to) { toast('⚠️ Select different junctions for corridor'); return; }
+
+  const btn = document.getElementById('btn-activate-amb');
+  btn.disabled = true;
+  btn.textContent = 'Activating…';
+
+  try {
+    const res  = await fetch('/api/ambulance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, to }),
+    });
+    const data = await res.json();
+    if (!res.ok) { toast('❌ ' + (data.error || 'Failed')); return; }
+
+    toast(`🚑 Corridor ${data.id} activated — ${data.path.length} junctions, ${data.distance_km}km`);
+    // Show ETA comparison
+    if (data.eta) {
+      document.getElementById('eta-normal').textContent    = data.eta.normal_time + ' min';
+      document.getElementById('eta-corridor').textContent  = data.eta.corridor_time + ' min';
+      document.getElementById('eta-saved').textContent     = data.eta.time_saved_pct + '%';
+      document.getElementById('eta-box').style.display     = 'block';
+    }
+    // Draw the corridor path on map
+    drawCorridorPath(data);
+    renderCorridors();
+  } catch(e) {
+    toast('❌ Network error activating corridor');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '🚑 Activate Green Corridor';
+  }
+}
+
+// ── Ambulance vehicle SVG icon ────────────────────────────────────────────────
+function makeAmbulanceVehicleIcon(heading) {
+  // heading: 0=north, 90=east etc. — rotate the ambulance to face direction of travel
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
+    <g transform="rotate(${heading}, 22, 22)">
+      <!-- Glow halo -->
+      <circle cx="22" cy="22" r="19" fill="rgba(255,153,0,0.15)" />
+      <!-- Body -->
+      <rect x="8" y="10" width="28" height="18" rx="3" fill="#fff" stroke="#ff9900" stroke-width="2"/>
+      <!-- Cab front -->
+      <rect x="28" y="12" width="7" height="14" rx="2" fill="#e0e0e0" stroke="#ff9900" stroke-width="1.5"/>
+      <!-- Red cross -->
+      <rect x="13" y="15" width="12" height="4" rx="1" fill="#ff2233"/>
+      <rect x="18" y="10" width="4" height="14" rx="1" fill="#ff2233"/>
+      <!-- Siren lights -->
+      <rect x="10" y="8" width="6" height="3" rx="1" fill="#ff2233"/>
+      <rect x="18" y="8" width="6" height="3" rx="1" fill="#0077ff"/>
+      <!-- Wheels -->
+      <circle cx="14" cy="30" r="4" fill="#333" stroke="#555" stroke-width="1"/>
+      <circle cx="30" cy="30" r="4" fill="#333" stroke="#555" stroke-width="1"/>
+    </g>
+  </svg>`;
+  return L.divIcon({
+    className: 'amb-vehicle-icon siren',
+    html: svg,
+    iconSize:   [44, 44],
+    iconAnchor: [22, 22],
+  });
+}
+
+// Compute bearing (degrees) from point A to point B
+function bearing(lat1, lng1, lat2, lng2) {
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const φ1   = lat1 * Math.PI / 180;
+  const φ2   = lat2 * Math.PI / 180;
+  const y    = Math.sin(dLng) * Math.cos(φ2);
+  const x    = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(dLng);
+  return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+}
+
+// ── Priority junction ring marker ─────────────────────────────────────────────
+function makePriorityRingIcon() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 60 60">
+    <circle cx="30" cy="30" r="20" fill="none" stroke="#ff9900" stroke-width="2.5"
+      stroke-dasharray="5 3" opacity="0.9">
+      <animateTransform attributeName="transform" type="rotate"
+        from="0 30 30" to="360 30 30" dur="3s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="30" cy="30" r="12" fill="rgba(255,153,0,0.12)" stroke="#ff9900"
+      stroke-width="1.5" opacity="0.8"/>
+    <text x="30" y="34" text-anchor="middle" font-size="10" font-weight="700"
+      fill="#ff9900" font-family="sans-serif">🚑</text>
+  </svg>`;
+  return L.divIcon({
+    className: '',
+    html: svg,
+    iconSize:   [60, 60],
+    iconAnchor: [30, 30],
+  });
+}
+
+function drawCorridorPath(corridor) {
+  // Remove old layers for this corridor if re-activated
+  clearCorridorLayers(corridor.id);
+
+  const layers = { pathLayer: null, junctionLayers: [], ambMarker: null, priorityRings: [] };
+  const path   = corridor.path;
+
+  // Full corridor dashed polyline
+  const latlngs = path.map(jid => {
+    const j = state[jid];
+    return j ? [j.lat, j.lng] : null;
+  }).filter(Boolean);
+
+  if (latlngs.length > 1) {
+    layers.pathLayer = L.polyline(latlngs, {
+      color: '#ff9900', weight: 6, opacity: 0.45, dashArray: '12 6',
+    }).addTo(map);
+
+    map.fitBounds(layers.pathLayer.getBounds(), { padding: [50, 50] });
+  }
+
+  // Ambulance marker at starting position
+  const startJ = state[path[0]];
+  if (startJ) {
+    const hdg = path.length > 1 && state[path[1]]
+      ? bearing(startJ.lat, startJ.lng, state[path[1]].lat, state[path[1]].lng)
+      : 90;
+    layers.ambMarker = L.marker([startJ.lat, startJ.lng], {
+      icon: makeAmbulanceVehicleIcon(hdg),
+      zIndexOffset: 2000,
+      interactive: false,
+    }).addTo(map);
+  }
+
+  // Priority rings on initial window junctions
+  const winJids = corridor.priority_jids || path.slice(0, 3);
+  winJids.forEach(jid => {
+    const j = state[jid];
+    if (!j) return;
+    const ring = L.marker([j.lat, j.lng], {
+      icon: makePriorityRingIcon(),
+      zIndexOffset: 1500,
+      interactive: false,
+    }).addTo(map);
+    layers.priorityRings.push(ring);
+  });
+
+  corridorLayers[corridor.id] = layers;
+}
+
+function clearCorridorLayers(cid) {
+  const cl = corridorLayers[cid];
+  if (!cl) return;
+  if (cl.pathLayer)      map.removeLayer(cl.pathLayer);
+  if (cl.ambMarker)      map.removeLayer(cl.ambMarker);
+  (cl.junctionLayers||[]).forEach(l => map.removeLayer(l));
+  (cl.priorityRings||[]).forEach(l => map.removeLayer(l));
+  delete corridorLayers[cid];
+}
+
+// Update ambulance marker position + priority rings from live corridor data
+function updateAmbulanceMarker(corridor) {
+  const cl = corridorLayers[corridor.id];
+  if (!cl) return;
+
+  const lat  = corridor.amb_lat;
+  const lng  = corridor.amb_lng;
+  const path = corridor.path;
+  const pos  = corridor.position_idx;
+
+  // Compute heading toward next junction
+  let hdg = 90;
+  if (pos < path.length - 1) {
+    const nj = state[path[pos + 1]];
+    if (nj) hdg = bearing(lat, lng, nj.lat, nj.lng);
+  }
+
+  if (cl.ambMarker) {
+    cl.ambMarker.setLatLng([lat, lng]);
+    cl.ambMarker.setIcon(makeAmbulanceVehicleIcon(hdg));
+  }
+
+  // Update priority rings
+  (cl.priorityRings || []).forEach(l => map.removeLayer(l));
+  cl.priorityRings = [];
+  const winJids = corridor.priority_jids || [];
+  winJids.forEach(jid => {
+    const j = state[jid];
+    if (!j) return;
+    const ring = L.marker([j.lat, j.lng], {
+      icon: makePriorityRingIcon(),
+      zIndexOffset: 1500,
+      interactive: false,
+    }).addTo(map);
+    cl.priorityRings.push(ring);
+  });
+}
+
+async function cancelCorridor(cid) {
+  try {
+    const res = await fetch(`/api/ambulance/${cid}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) { toast('❌ ' + (data.error || 'Failed')); return; }
+    clearCorridorLayers(cid);
+    toast(`✅ Corridor ${cid} deactivated`);
+    renderCorridors();
+  } catch(e) {
+    toast('❌ Error cancelling corridor');
+  }
+}
+
+async function renderCorridors() {
+  try {
+    const res  = await fetch('/api/ambulance');
+    activeCorridors = await res.json();
+
+    const box = document.getElementById('amb-corridors');
+    if (!activeCorridors.length) {
+      box.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:4px 0">No active corridors</div>';
+      // Clean up any stale map layers
+      Object.keys(corridorLayers).forEach(cid => clearCorridorLayers(cid));
+      return;
+    }
+
+    // Sync map layers: create for new corridors, update existing, remove stale
+    const liveIds = new Set(activeCorridors.map(c => c.id));
+    Object.keys(corridorLayers).forEach(cid => {
+      if (!liveIds.has(cid)) clearCorridorLayers(cid);
+    });
+
+    activeCorridors.forEach(c => {
+      if (!corridorLayers[c.id]) {
+        drawCorridorPath(c);
+      } else {
+        updateAmbulanceMarker(c);
+      }
+    });
+
+    // Render sidebar cards
+    box.innerHTML = activeCorridors.map(c => {
+      const progress = Math.round((c.position_idx / Math.max(1, c.path.length - 1)) * 100);
+      const junctionsLeft = c.path.length - 1 - c.position_idx;
+      const winNames = (c.priority_jids || []).map(jid => state[jid]?.name || jid);
+
+      const priorityHtml = winNames.length
+        ? `<div style="margin-top:5px;padding:4px 6px;background:rgba(255,153,0,.1);border-radius:4px;border-left:2px solid var(--amber)">
+            <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px">🟢 Priority Window</div>
+            ${winNames.map((n,i)=>`<div style="font-size:10px;color:${i===0?'#ff9900':'#cc7a00'};padding:1px 0">${i===0?'🚑':'⏩'} ${n}</div>`).join('')}
+          </div>`
+        : '';
+
+      return `<div class="corridor-card" id="ccard-${c.id}">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="c-id">🚑 ${c.id}</div>
+          <button class="btn-cancel" onclick="cancelCorridor('${c.id}')">✕ Cancel</button>
+        </div>
+        <div class="c-path">${c.from_name} → ${c.to_name}</div>
+        <div class="amb-cur-junc">📍 ${c.amb_at_name || '—'}</div>
+        <div class="amb-pos-bar"><div class="amb-pos-fill" id="apf-${c.id}" style="width:${progress}%"></div></div>
+        <div style="display:flex;justify-content:space-between;margin-top:3px;font-size:10px;color:var(--muted)">
+          <span>${c.position_idx + 1} / ${c.path.length} junctions</span>
+          <span>${junctionsLeft} remaining</span>
+        </div>
+        ${priorityHtml}
+        <div class="c-meta" style="margin-top:5px">
+          <span class="c-ttl">⏱ ${c.distance_km}km · ${c.ttl}s TTL</span>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Animate progress bars live
+    activeCorridors.forEach(c => {
+      const el = document.getElementById(`apf-${c.id}`);
+      if (el) el.style.width = Math.round((c.position_idx / Math.max(1, c.path.length-1)) * 100) + '%';
+    });
+
+  } catch(e) { /* ignore */ }
+}
+
+// ── VIP Convoy Functions ──────────────────────────────────────────────────────
+
+// Build 20-car convoy SVG — cars in a column, lead car + 19 security cars
+function makeConvoyIcon(heading) {
+  const CAR_W = 10, CAR_H = 18, GAP = 3;
+  const cols = 2, rows = 10;            // 2 columns × 10 rows = 20 cars
+  const W = cols * CAR_W + (cols-1) * GAP + 16;  // total width
+  const H = rows * CAR_H + (rows-1) * GAP + 16;  // total height
+
+  // Build car grid: [0] = lead VIP car (gold), rest = black security cars
+  let cars = '';
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const idx = row * cols + col;
+      const x   = 8 + col * (CAR_W + GAP);
+      const y   = 8 + row * (CAR_H + GAP);
+      const isLead = (idx === 0);
+      const bodyColor   = isLead ? '#c9a227' : '#1a1a2e';
+      const windowColor = isLead ? '#ffe066' : '#2244aa';
+      const strokeColor = isLead ? '#f0c040' : '#3355cc';
+
+      cars += `
+        <rect x="${x}" y="${y}" width="${CAR_W}" height="${CAR_H}" rx="2"
+              fill="${bodyColor}" stroke="${strokeColor}" stroke-width="0.8"/>
+        <rect x="${x+1.5}" y="${y+2}" width="${CAR_W-3}" height="${CAR_H*0.35}" rx="1"
+              fill="${windowColor}" opacity="0.85"/>
+        ${isLead ? `<text x="${x+CAR_W/2}" y="${y+CAR_H-3}" text-anchor="middle"
+              font-size="5" font-weight="700" fill="#000" font-family="sans-serif">★</text>` : ''}`;
+    }
+  }
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+    <g transform="rotate(${heading}, ${W/2}, ${H/2})">
+      <!-- Glow halo -->
+      <ellipse cx="${W/2}" cy="${H/2}" rx="${W/2-2}" ry="${H/2-2}"
+               fill="rgba(201,162,39,0.12)" stroke="#c9a227" stroke-width="1" stroke-dasharray="4 3"/>
+      ${cars}
+    </g>
+  </svg>`;
+
+  return L.divIcon({
+    className: 'vip-convoy-icon',
+    html: svg,
+    iconSize:   [W, H],
+    iconAnchor: [W/2, H/2],
+  });
+}
+
+// Gold priority ring for VIP junctions (same spin but gold coloured)
+function makeVipRingIcon() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="70" height="70" viewBox="0 0 70 70">
+    <circle cx="35" cy="35" r="28" fill="none" stroke="#c9a227" stroke-width="3"
+      stroke-dasharray="6 3" opacity="0.95">
+      <animateTransform attributeName="transform" type="rotate"
+        from="0 35 35" to="360 35 35" dur="2s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="35" cy="35" r="18" fill="rgba(201,162,39,0.15)" stroke="#f0c040"
+      stroke-width="1.5" opacity="0.85"/>
+    <!-- Inner spinning ring -->
+    <circle cx="35" cy="35" r="10" fill="none" stroke="#c9a227" stroke-width="1.5"
+      stroke-dasharray="3 2" opacity="0.7">
+      <animateTransform attributeName="transform" type="rotate"
+        from="360 35 35" to="0 35 35" dur="1.5s" repeatCount="indefinite"/>
+    </circle>
+    <text x="35" y="39" text-anchor="middle" font-size="13" fill="#f0c040"
+          font-family="sans-serif">👑</text>
+  </svg>`;
+  return L.divIcon({
+    className: '',
+    html: svg,
+    iconSize:   [70, 70],
+    iconAnchor: [35, 35],
+  });
+}
+
+function drawVipPath(corridor) {
+  clearVipLayers(corridor.id);
+  const layers = { pathLayer: null, convoyMarker: null, priorityRings: [] };
+  const path   = corridor.path;
+
+  const latlngs = path.map(jid => {
+    const j = state[jid]; return j ? [j.lat, j.lng] : null;
+  }).filter(Boolean);
+
+  if (latlngs.length > 1) {
+    // Solid gold thick line for VIP (no dash — absolute lockdown)
+    layers.pathLayer = L.polyline(latlngs, {
+      color: '#c9a227', weight: 8, opacity: 0.55,
+    }).addTo(map);
+    map.fitBounds(layers.pathLayer.getBounds(), { padding: [50, 50] });
+  }
+
+  // Convoy marker at start
+  const startJ = state[path[0]];
+  if (startJ) {
+    const hdg = path.length > 1 && state[path[1]]
+      ? bearing(startJ.lat, startJ.lng, state[path[1]].lat, state[path[1]].lng) : 90;
+    layers.convoyMarker = L.marker([startJ.lat, startJ.lng], {
+      icon: makeConvoyIcon(hdg), zIndexOffset: 2000, interactive: false,
+    }).addTo(map);
+  }
+
+  // Priority rings on window junctions
+  (corridor.priority_jids || path.slice(0, 3)).forEach(jid => {
+    const j = state[jid]; if (!j) return;
+    const ring = L.marker([j.lat, j.lng], {
+      icon: makeVipRingIcon(), zIndexOffset: 1500, interactive: false,
+    }).addTo(map);
+    layers.priorityRings.push(ring);
+  });
+
+  vipLayers[corridor.id] = layers;
+}
+
+function clearVipLayers(cid) {
+  const cl = vipLayers[cid];
+  if (!cl) return;
+  if (cl.pathLayer)    map.removeLayer(cl.pathLayer);
+  if (cl.convoyMarker) map.removeLayer(cl.convoyMarker);
+  (cl.priorityRings||[]).forEach(l => map.removeLayer(l));
+  delete vipLayers[cid];
+}
+
+function updateVipMarker(corridor) {
+  const cl = vipLayers[corridor.id];
+  if (!cl) return;
+  const lat  = corridor.vip_lat;
+  const lng  = corridor.vip_lng;
+  const path = corridor.path;
+  const pos  = corridor.position_idx;
+
+  let hdg = 90;
+  if (pos < path.length - 1) {
+    const nj = state[path[pos + 1]];
+    if (nj) hdg = bearing(lat, lng, nj.lat, nj.lng);
+  }
+
+  if (cl.convoyMarker) {
+    cl.convoyMarker.setLatLng([lat, lng]);
+    cl.convoyMarker.setIcon(makeConvoyIcon(hdg));
+  }
+
+  // Refresh priority rings
+  (cl.priorityRings||[]).forEach(l => map.removeLayer(l));
+  cl.priorityRings = [];
+  (corridor.priority_jids || []).forEach(jid => {
+    const j = state[jid]; if (!j) return;
+    const ring = L.marker([j.lat, j.lng], {
+      icon: makeVipRingIcon(), zIndexOffset: 1500, interactive: false,
+    }).addTo(map);
+    cl.priorityRings.push(ring);
+  });
+}
+
+async function activateVipCorridor() {
+  const from = document.getElementById('vip-from').value;
+  const to   = document.getElementById('vip-to').value;
+  if (from === to) { toast('⚠️ Select different junctions for VIP convoy'); return; }
+
+  const btn = document.getElementById('btn-activate-vip');
+  btn.disabled = true; btn.textContent = 'Deploying…';
+
+  try {
+    const res  = await fetch('/api/vip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, to }),
+    });
+    const data = await res.json();
+    if (!res.ok) { toast('❌ ' + (data.error || 'Failed')); return; }
+    toast(`👑 VIP Convoy ${data.id} deployed — ${data.path.length} junctions locked`);
+    drawVipPath(data);
+    renderVipCorridors();
+  } catch(e) {
+    toast('❌ Network error deploying VIP convoy');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '👑 Deploy VIP Convoy';
+  }
+}
+
+async function cancelVipCorridor(cid) {
+  try {
+    const res  = await fetch(`/api/vip/${cid}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) { toast('❌ ' + (data.error || 'Failed')); return; }
+    clearVipLayers(cid);
+    toast(`✅ VIP Corridor ${cid} cleared`);
+    renderVipCorridors();
+  } catch(e) { toast('❌ Error cancelling VIP corridor'); }
+}
+
+async function renderVipCorridors() {
+  try {
+    const res = await fetch('/api/vip');
+    activeVipCorridors = await res.json();
+
+    const box = document.getElementById('vip-corridors');
+    if (!activeVipCorridors.length) {
+      box.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:4px 0">No active VIP convoys</div>';
+      Object.keys(vipLayers).forEach(cid => clearVipLayers(cid));
+      return;
+    }
+
+    // Sync map layers
+    const liveIds = new Set(activeVipCorridors.map(c => c.id));
+    Object.keys(vipLayers).forEach(cid => { if (!liveIds.has(cid)) clearVipLayers(cid); });
+    activeVipCorridors.forEach(c => {
+      if (!vipLayers[c.id]) drawVipPath(c);
+      else                  updateVipMarker(c);
+    });
+
+    // Render sidebar cards
+    box.innerHTML = activeVipCorridors.map(c => {
+      const progress     = Math.round((c.position_idx / Math.max(1, c.path.length - 1)) * 100);
+      const junctionsLeft = c.path.length - 1 - c.position_idx;
+      const winNames     = (c.priority_jids || []).map(jid => state[jid]?.name || jid);
+
+      const lockdownHtml = winNames.length
+        ? `<div style="margin-top:5px;padding:4px 6px;background:rgba(201,162,39,.1);border-radius:4px;border-left:2px solid #c9a227">
+            <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px">🔴 ALL-RED Lockdown Window</div>
+            ${winNames.map((n,i)=>
+              `<div style="font-size:10px;color:${i===0?'#f0c040':'#a07820'};padding:1px 0">${i===0?'👑':'🚗'} ${n}</div>`
+            ).join('')}
+          </div>` : '';
+
+      return `<div class="vip-card" id="vcard-${c.id}">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="v-id">👑 ${c.id}</div>
+          <button class="btn-cancel" onclick="cancelVipCorridor('${c.id}')">✕ Cancel</button>
+        </div>
+        <div class="v-path">${c.from_name} → ${c.to_name}</div>
+        <div class="vip-cur-junc">📍 ${c.vip_at_name || '—'} · 20 cars</div>
+        <div class="vip-pos-bar"><div class="vip-pos-fill" id="vpf-${c.id}" style="width:${progress}%"></div></div>
+        <div style="display:flex;justify-content:space-between;margin-top:3px;font-size:10px;color:var(--muted)">
+          <span>${c.position_idx + 1} / ${c.path.length} junctions</span>
+          <span>${junctionsLeft} remaining</span>
+        </div>
+        ${lockdownHtml}
+        <div style="margin-top:5px;font-size:10px;color:var(--muted)">⏱ ${c.distance_km}km · ${c.ttl}s TTL</div>
+      </div>`;
+    }).join('');
+
+  } catch(e) { /* ignore */ }
+}
+
+// ── Rupali Canal JAM Simulation ──────────────────────────────────────────────
+let _rupaliJamActive = false;
+
+async function triggerRupaliJam() {
+  const btn = document.getElementById('btn-jam-activate');
+  btn.disabled = true;
+  btn.textContent = 'Activating jam…';
+  try {
+    const res  = await fetch('/api/simulate/rupali_jam', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) { toast('❌ ' + (data.error || 'Failed to start jam')); return; }
+
+    _rupaliJamActive = true;
+    document.getElementById('btn-jam-cancel').style.display = 'flex';
+    btn.style.display = 'none';
+
+    const banner = document.getElementById('jam-status-banner');
+    banner.classList.add('active');
+    document.getElementById('jam-status-detail').textContent =
+      `${data.vehicles} veh/road on Rupali Canal + ${(data.neighbors||[]).length} nearby junctions overloaded. Checking for alternate route…`;
+
+    toast('🚨 JAM activated — auto-rerouting if route is affected…');
+
+    // ── Immediately recheck route — don't wait for 5s timer ──────────────────
+    if (currentRouteTo) {
+      showAheadAlert('⚠️ Rupali Canal JAM activated — evaluating alternate route…');
+      forceRerouteCheck();
+    }
+
+    // Zoom map to Rupali Canal junction for dramatic effect
+    if (state['rupali_canal']) {
+      map.setView([state['rupali_canal'].lat, state['rupali_canal'].lng], 15, { animate: true });
+    }
+  } catch(e) {
+    toast('❌ Network error activating jam');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '🚨 Simulate Rupali Canal JAM';
+  }
+}
+
+async function cancelRupaliJam() {
+  try {
+    const res  = await fetch('/api/simulate/rupali_jam', { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) { toast('❌ ' + (data.error || 'Failed to cancel jam')); return; }
+
+    _rupaliJamActive = false;
+    document.getElementById('btn-jam-cancel').style.display = 'none';
+    document.getElementById('btn-jam-activate').style.display = 'flex';
+    const banner = document.getElementById('jam-status-banner');
+    banner.classList.remove('active');
+    hideAheadAlert();
+    toast('✅ Rupali Canal traffic normalised — recalculating route…');
+
+    // ── Re-evaluate route now that jam is cleared ──────────────────────────
+    if (currentRouteTo) forceRerouteCheck();
+  } catch(e) {
+    toast('❌ Network error cancelling jam');
+  }
+}
+
+// ── Route Finder ─────────────────────────────────────────────────────────────
+// ── Route Vehicle & Smart Rerouting ─────────────────────────────────────────
+//
+// Design:
+//  • Vehicle animates along the path at constant visual speed
+//  • Every CHECK_INTERVAL seconds, frontend calls /api/route/check with:
+//    - vehicle's CURRENT junction (not original source)
+//    - remaining path IDs ahead of vehicle
+//    - committed_ahead window (junctions we won't reroute within)
+//  • Server returns reroute=true only if:
+//    - Path genuinely diverges beyond committed window
+//    - New path saves ≥ 15% congestion vs old path
+//  • On reroute: vehicle continues from its current position on the new path
+// ─────────────────────────────────────────────────────────────────────────────
+
+const VEHICLE_SPEED      = 0.006;   // fraction/frame at ~12fps → ~1.4s/junction (demo)
+const CHECK_INTERVAL_MS  = 3000;    // recheck every 3 seconds
+const COMMITTED_AHEAD    = 1;       // junctions ahead vehicle is committed to (reduced: 1 → reroute sooner)
+const CRITICAL_VEH_AHEAD = 70;      // vehicles = critical jam (lowered from 80)
+const LOOKAHEAD_COUNT    = 5;       // how many junctions ahead to scan for congestion
+
+let routeVehicleMarker   = null;
+let routeVehicleIdx      = 0;
+let routeVehicleFrac     = 0.0;
+let routeVehiclePath     = [];      // [{id,name,lat,lng,vehicles}]
+let routeVehicleTimer    = null;
+let routeRecheckTimer    = null;
+let currentRouteTo       = null;
+let rerouteCount         = 0;       // how many times vehicle has been rerouted
+let lastRerouteReason    = '';
+let _lastAheadCheck      = -1;      // prevents duplicate ahead-traffic triggers per junction
+
+function makeRouteCarIcon() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+    <circle cx="16" cy="16" r="14" fill="rgba(0,212,255,0.15)" stroke="#00d4ff" stroke-width="1.5"/>
+    <rect x="8" y="11" width="16" height="10" rx="2" fill="#00d4ff"/>
+    <rect x="10" y="9" width="12" height="5" rx="1.5" fill="#aaddff"/>
+    <circle cx="11" cy="22" r="2.5" fill="#222" stroke="#555" stroke-width="0.8"/>
+    <circle cx="21" cy="22" r="2.5" fill="#222" stroke="#555" stroke-width="0.8"/>
+  </svg>`;
+  return L.divIcon({ className:'', html:svg, iconSize:[32,32], iconAnchor:[16,16] });
+}
+
+function stopRouteVehicle() {
+  if (routeVehicleTimer)  { clearInterval(routeVehicleTimer);  routeVehicleTimer  = null; }
+  if (routeRecheckTimer)  { clearInterval(routeRecheckTimer);  routeRecheckTimer  = null; }
+  if (routeVehicleMarker && map) { map.removeLayer(routeVehicleMarker); routeVehicleMarker = null; }
+  document.getElementById('route-reroute-notice').style.display = 'none';
+  hideAheadAlert();
+  currentRouteTo  = null;
+  rerouteCount    = 0;
+  _vehicleWaitingAtRed     = false;
+  _lastJunctionRecheckIdx  = -1;
+  _lastAheadCheck          = -1;
+}
+
+function startRouteVehicle(pathData) {
+  stopRouteVehicle();
+  routeVehiclePath = pathData;
+  routeVehicleIdx  = 0;
+  routeVehicleFrac = 0.0;
+  _vehicleWaitingAtRed    = false;
+  _lastJunctionRecheckIdx = -1;
+  _lastAheadCheck          = -1;
+
+  if (map && pathData.length > 0) {
+    routeVehicleMarker = L.marker([pathData[0].lat, pathData[0].lng], {
+      icon: makeRouteCarIcon(), zIndexOffset: 600,
+    }).addTo(map);
+    routeVehicleMarker.bindTooltip('🚗 En route', {permanent:false, direction:'top'});
+  }
+
+  routeVehicleTimer  = setInterval(animateRouteVehicle, 80);
+  routeRecheckTimer  = setInterval(smartRecheckRoute, CHECK_INTERVAL_MS);
+
+  // Do an immediate first pass — catches any pre-existing jam on the path
+  setTimeout(smartRecheckRoute, 800);
+}
+
+// Tracks whether we are currently blocked at a red signal
+let _vehicleWaitingAtRed = false;
+let _lastJunctionRecheckIdx = -1;   // prevents calling smartRecheckRoute twice for same junction
+
+function animateRouteVehicle() {
+  if (!routeVehiclePath || routeVehiclePath.length < 2) return;
+  if (routeVehicleIdx >= routeVehiclePath.length - 1) {
+    toast('🚗 Vehicle arrived at destination!');
+    stopRouteVehicle();
+    return;
+  }
+
+  const cur = routeVehiclePath[routeVehicleIdx];
+  const nxt = routeVehiclePath[routeVehicleIdx + 1];
+  if (!cur || !nxt) return;
+
+  // ── SIGNAL CHECK — only when vehicle is exactly AT a junction (frac === 0) ──
+  // Once the vehicle enters a road segment (frac > 0) it is committed and
+  // must complete that segment regardless of signal changes mid-way.
+  if (routeVehicleFrac === 0.0) {
+    const jState = state && state[cur.id];
+    const roadSigs = jState && jState.road_signals;
+    const sig = roadSigs && roadSigs.find(rs => rs.road_to === nxt.id);
+
+    if (sig && sig.phase === 'red') {
+      // ── RED ── vehicle waits at this junction ──────────────────────────────
+      _vehicleWaitingAtRed = true;
+      if (routeVehicleMarker) {
+        const waitSecs = sig.countdown > 0 ? sig.countdown :
+                         (jState.countdown || '?');
+        routeVehicleMarker.setTooltipContent(
+          `🔴 Waiting at red · ${waitSecs}s`
+        );
+        // Snap marker exactly onto the junction so it doesn't float between
+        routeVehicleMarker.setLatLng([cur.lat, cur.lng]);
+      }
+      return;  // ← do NOT move
+    }
+
+    // ── GREEN or YELLOW (or no signal data yet) — clear the wait flag ────────
+    if (_vehicleWaitingAtRed) {
+      _vehicleWaitingAtRed = false;
+      if (routeVehicleMarker) {
+        const phaseEmoji = (sig && sig.phase === 'yellow') ? '🟡' : '🟢';
+        routeVehicleMarker.setTooltipContent(`${phaseEmoji} Moving`);
+      }
+    }
+
+    // ── Junction arrival: trigger smart reroute check ─────────────────────────
+    if (routeVehicleIdx !== _lastJunctionRecheckIdx) {
+      _lastJunctionRecheckIdx = routeVehicleIdx;
+      smartRecheckRoute();   // async — won't block animation
+    }
+
+    // ── Ahead-traffic scan: look forward LOOKAHEAD_COUNT junctions ───────────
+    // NOTE: We do NOT gate on _lastAheadCheck here — we re-scan every time
+    // vehicle is at a junction (frac===0) so that a JAM activated mid-wait
+    // is caught immediately without waiting for the next junction arrival.
+    {
+      // Scan from the very NEXT junction (idx+1) through LOOKAHEAD_COUNT beyond
+      const lookAheadJids = routeVehiclePath
+        .slice(routeVehicleIdx + 1, routeVehicleIdx + 1 + LOOKAHEAD_COUNT)
+        .map(j => j.id);
+      const worstJid = lookAheadJids.find(jid => {
+        const jInfo = state && state[jid];
+        return jInfo && jInfo.vehicles >= CRITICAL_VEH_AHEAD;
+      });
+      if (worstJid) {
+        const worstInfo = state && state[worstJid];
+        if (worstInfo) {
+          showAheadAlert(`⚠️ Heavy traffic ahead at ${worstInfo.name} (${worstInfo.vehicles}v) — checking alternate route…`);
+        }
+        // Only fire an extra reroute call if the situation changed vs last check
+        if (routeVehicleIdx !== _lastAheadCheck) {
+          _lastAheadCheck = routeVehicleIdx;
+          smartRecheckRoute();  // immediate (in addition to timer)
+        }
+      } else {
+        hideAheadAlert();
+        _lastAheadCheck = -1;  // reset so next congestion is caught immediately
+      }
+    }
+  }
+
+  // ── MOVE ──────────────────────────────────────────────────────────────────
+  routeVehicleFrac += VEHICLE_SPEED;
+  if (routeVehicleFrac >= 1.0) {
+    routeVehicleIdx++;
+    routeVehicleFrac = 0.0;
+    if (routeVehicleIdx >= routeVehiclePath.length - 1) {
+      toast('🚗 Vehicle arrived at destination!');
+      stopRouteVehicle();
+      return;
+    }
+  }
+
+  if (routeVehicleMarker && map) {
+    const c = routeVehiclePath[routeVehicleIdx];
+    const n = routeVehiclePath[routeVehicleIdx + 1];
+    if (c && n) {
+      routeVehicleMarker.setLatLng([
+        c.lat + (n.lat - c.lat) * routeVehicleFrac,
+        c.lng + (n.lng - c.lng) * routeVehicleFrac,
+      ]);
+    }
+  }
+}
+
+// ── Force an immediate reroute evaluation (resets guards) ────────────────────
+function forceRerouteCheck() {
+  _lastJunctionRecheckIdx = -1;   // allow junction check to fire again
+  _lastAheadCheck         = -1;   // allow ahead scan to fire again
+  smartRecheckRoute();            // fire immediately
+}
+
+async function smartRecheckRoute() {
+  if (!currentRouteTo || !routeVehiclePath.length) return;
+
+  // Current junction = where vehicle is right now
+  const curJid = routeVehiclePath[routeVehicleIdx]?.id;
+  if (!curJid || curJid === currentRouteTo) return;
+
+  // Remaining path IDs starting from current position
+  const remainingPathIds = routeVehiclePath.slice(routeVehicleIdx).map(j => j.id);
+
+  // Use committed_ahead=0 when vehicle is exactly AT a junction (can reroute NOW)
+  // Use committed_ahead=1 when mid-segment (committed to next junction)
+  const dynCommitted = routeVehicleFrac === 0.0 ? 0 : COMMITTED_AHEAD;
+
+  try {
+    const res  = await fetch('/api/route/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from:             curJid,
+        to:               currentRouteTo,
+        committed_path:   remainingPathIds,
+        committed_ahead:  dynCommitted,
+      }),
+    });
+    const data = await res.json();
+    if (data.error) return;
+
+    // Always update the ahead-traffic warning even if not rerouting
+    if (data.critical_ahead && !data.reroute) {
+      showAheadAlert(`⚠️ Heavy traffic ahead at ${data.critical_ahead.name} (${data.critical_ahead.vehicles}v) — monitoring for alternate route`);
+    } else if (!data.critical_ahead && !data.reroute) {
+      hideAheadAlert();
+    }
+
+    if (!data.reroute) return;
+
+    // ── Reroute triggered ─────────────────────────────────────────────────
+    rerouteCount++;
+    lastRerouteReason = data.reason;
+
+    const notice = document.getElementById('route-reroute-notice');
+    notice.textContent = `🔄 Rerouted! ${data.reason} (saved ${data.saving_pct}%)`;
+    notice.style.display = 'block';
+    setTimeout(() => { notice.style.display = 'none'; }, 8000);
+    toast(`🔄 Auto-rerouted! ${data.reason}`);
+    hideAheadAlert();
+
+    // Update map route line with new colour flash
+    if (map) {
+      if (routeLayer) map.removeLayer(routeLayer);
+      // Flash orange for 1.5s then switch to cyan to signal reroute
+      routeLayer = L.polyline(data.path.map(j => [j.lat, j.lng]),
+        { color:'#ff9900', weight:5, opacity:1 }).addTo(map);
+      setTimeout(() => {
+        if (routeLayer) map.removeLayer(routeLayer);
+        routeLayer = L.polyline(data.path.map(j => [j.lat, j.lng]),
+          { color:'#00d4ff', weight:4, opacity:.9, dashArray:'8 4' }).addTo(map);
+      }, 1500);
+    }
+
+    // Update result panel
+    showRouteResult(data, rerouteCount, lastRerouteReason);
+
+    // Continue vehicle from current position on new path
+    const newPathJids = data.path_ids;
+    let newStart = 0;
+    for (let i = 0; i < newPathJids.length; i++) {
+      if (newPathJids[i] === curJid) { newStart = i; break; }
+    }
+    routeVehiclePath = data.path;
+    routeVehicleIdx  = newStart;
+    routeVehicleFrac = 0.0;
+    _lastJunctionRecheckIdx = -1;
+    _lastAheadCheck         = -1;  // re-scan new path immediately
+
+  } catch(e) { /* network error — stay on current path */ }
+}
+
+// ── Ahead Traffic Alert Banner ─────────────────────────────────────────────
+function showAheadAlert(msg) {
+  let el = document.getElementById('route-ahead-alert');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'route-ahead-alert';
+    el.style.cssText = [
+      'margin-top:6px', 'font-size:10px', 'color:#ff8c00',
+      'font-family:var(--font-mono)', 'text-align:center',
+      'background:rgba(255,140,0,.12)', 'border-radius:4px',
+      'padding:5px 8px', 'border-left:3px solid #ff8c00',
+      'line-height:1.4', 'animation:jam-blink-border 1s step-start infinite',
+    ].join(';');
+    const routeBox = document.querySelector('.route-box');
+    if (routeBox) {
+      const notice = document.getElementById('route-reroute-notice');
+      routeBox.insertBefore(el, notice || routeBox.querySelector('#route-result'));
+    }
+  }
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function hideAheadAlert() {
+  const el = document.getElementById('route-ahead-alert');
+  if (el) el.style.display = 'none';
+}
+
+function showRouteResult(data, rerouteCountVal = 0, rerouteReason = '') {
+  const stops = data.path.map(j => {
+    const vc = j.vehicles > 60 ? '#ff3b5c' : j.vehicles > 20 ? '#ff8c00' : '#00ff88';
+    return `<div class="route-stop"><div class="dot"></div><span>${j.name}</span>
+     <span style="margin-left:auto;font-family:var(--font-mono);font-size:10px;color:${vc}">${j.vehicles||0}v</span></div>`;
+  }).join('');
+  const rerouteInfo = rerouteCountVal > 0
+    ? `<div style="font-size:10px;color:#ff9900;margin:4px 0;font-family:var(--font-mono)">🔄 Rerouted ${rerouteCountVal}× — ${rerouteReason}</div>`
+    : '';
+  const result = document.getElementById('route-result');
+  result.style.display = 'block';
+  result.innerHTML = `
+    <div class="route-stat"><span class="lbl">Distance</span><span class="val">${data.distance_km} km</span></div>
+    <div class="route-stat"><span class="lbl">Est. Time</span><span class="val">${data.estimated_minutes} min</span></div>
+    <div style="font-size:10px;color:var(--muted);margin:4px 0 2px;font-family:var(--font-mono)">🚗 Vehicle following live</div>
+    ${rerouteInfo}
+    <div class="route-stops">${stops}</div>`;
+}
+
+async function findRoute() {
+  const from = document.getElementById('sel-from').value;
+  const to   = document.getElementById('sel-to').value;
+  if (from === to) { toast('⚠️ Select different junctions'); return; }
+
+  const res  = await fetch(`/api/route?from=${from}&to=${to}`);
+  const data = await res.json();
+  if (data.error) { toast('❌ ' + data.error); return; }
+
+  // Draw route on map
+  if (map) {
+    if (routeLayer) map.removeLayer(routeLayer);
+    const latlngs = data.path.map(j => [j.lat, j.lng]);
+    routeLayer = L.polyline(latlngs, { color:'#00d4ff', weight:4, opacity:.9, dashArray:'8 4' }).addTo(map);
+    map.fitBounds(routeLayer.getBounds(), { padding: [40, 40] });
+  }
+
+  currentRouteTo = to;
+  rerouteCount   = 0;
+  showRouteResult(data);
+  toast(`✅ Route: ${data.path.length} stops · ${data.distance_km} km`);
+  startRouteVehicle(data.path);
+}
+
+
+// ── Clock & Period ────────────────────────────────────────────────────────────
+function updateClock() {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-IN');
+  document.getElementById('traffic-period').textContent = trafficPeriodLabel();
+}
+setInterval(updateClock, 5000); updateClock();
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ── ML Prediction Panel ──────────────────────────────────────────────────────
+function updateMLPanel(stateData) {
+  // Show top 5 junctions with highest predicted increase
+  const preds = [];
+  Object.entries(stateData).forEach(([jid, info]) => {
+    const pred = info.prediction || {};
+    Object.entries(pred).forEach(([road, p]) => {
+      if (!p) return;
+      const delta = (p.predicted || 0) - (p.current || 0);
+      if (delta > 5 || p.action === 'predicted_congestion') {
+        preds.push({
+          jname: info.name,
+          road,
+          current:   p.current   || 0,
+          predicted: p.predicted || 0,
+          trend:     p.trend     || 0,
+          action:    p.action    || 'normal',
+          delta,
+        });
+      }
+    });
+  });
+
+  // Sort by biggest predicted increase
+  preds.sort((a, b) => b.predicted - a.predicted);
+  const top = preds.slice(0, 5);
+
+  const box = document.getElementById('ml-predictions');
+  if (!box) return;
+
+  if (!top.length) {
+    box.innerHTML = '<div style="font-size:11px;color:var(--muted)">No congestion predicted ✓</div>';
+    return;
+  }
+
+  box.innerHTML = top.map(p => {
+    const trendIcon = p.trend > 0.3 ? '↑' : p.trend < -0.3 ? '↓' : '→';
+    const trendCls  = p.trend > 0.3 ? 'pred-rising' : p.trend < -0.3 ? 'pred-falling' : 'pred-stable';
+    const barW      = Math.min(100, Math.round(p.predicted / 2));
+    const barColor  = p.predicted > 80 ? '#ff3b5c' : p.predicted > 50 ? '#ff8c00' : '#00ff88';
+    const isAction  = p.action === 'predicted_congestion';
+    return `<div style="background:var(--surface2);border-radius:5px;padding:6px 8px;
+                         ${isAction ? 'border-left:2px solid #ff8c00' : ''}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+        <span style="font-size:10px;font-family:var(--font-display);font-weight:600;
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px">
+          ${p.jname}
+        </span>
+        <span class="${trendCls}" style="font-family:var(--font-mono);font-size:11px;font-weight:700">
+          ${trendIcon} ${p.predicted}v
+        </span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:9px;color:var(--muted);font-family:var(--font-mono)">now ${p.current}v →</span>
+        <div style="flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${barW}%;background:${barColor};border-radius:3px;transition:width .5s"></div>
+        </div>
+        ${isAction ? '<span style="font-size:9px;color:#ff8c00;font-family:var(--font-mono)">⚡ pre-clear</span>' : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Main Loop ─────────────────────────────────────────────────────────────────
+async function tick() {
+  try {
+    const res = await fetch('/api/state');
+    state = await res.json();
+    if (!initialized) { initMarkers(state); initialized = true; }
+    renderSidebar(state);
+    updateMarkers(state);
+    updateStats(state);
+    updateDetailPanel();
+    updateMLPanel(state);
+  } catch(e) { console.error(e); }
+}
+
+tick();
+setInterval(tick, 1000);
+renderCorridors();
+setInterval(renderCorridors, 1000);  // sync ambulance position every second
+renderVipCorridors();
+setInterval(renderVipCorridors, 1000); // sync VIP convoy every second
+</script>
+</body>
+</html>

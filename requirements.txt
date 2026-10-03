@@ -1,0 +1,8 @@
+flask
+flask-cors
+requests
+pyserial
+scikit-learn
+numpy
+# Optional — only needed for live microphone ML (not required for Arduino mode)
+# librosa
